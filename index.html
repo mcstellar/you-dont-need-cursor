@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>You Don't Need Cursor — build a coding agent harness from scratch</title>
+<meta name="description" content="An interactive, offline tutorial that teaches you how coding agent harnesses (Cursor, Claude Code, Aider) actually work, by having you run a tiny one yourself.">
+<style>
+  :root {
+    --bg: #0f1115;
+    --bg-panel: #161922;
+    --bg-panel-2: #1d212c;
+    --bg-inset: #0b0d12;
+    --border: #2a2f3d;
+    --text: #e7e9f0;
+    --text-dim: #9aa1b5;
+    --text-dimmer: #6b7185;
+    --accent: #ffb454;
+    --accent-strong: #ffc978;
+    --good: #7ee3a8;
+    --bad: #ff8080;
+    --warn: #ffd166;
+    --focus: #7ec8ff;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { color-scheme: dark; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--accent); }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  button, select, input {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  code, pre, .mono {
+    font-family: var(--mono);
+  }
+
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 clamp(14px, 4vw, 32px);
+  }
+
+  header.site {
+    border-bottom: 1px solid var(--border);
+    padding: clamp(20px, 5vw, 36px) 0 clamp(16px, 4vw, 24px);
+  }
+
+  header.site h1 {
+    margin: 0 0 6px;
+    font-size: clamp(1.5rem, 4vw, 2.2rem);
+    letter-spacing: -0.02em;
+  }
+
+  header.site h1 .dim {
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .tagline {
+    margin: 0 0 14px;
+    color: var(--text-dim);
+    font-size: clamp(0.95rem, 2.4vw, 1.05rem);
+    max-width: 62ch;
+  }
+
+  .trust-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    margin-top: 10px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    padding: 4px 10px;
+    border-radius: 999px;
+  }
+
+  nav.stepper {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0;
+  }
+
+  .stepper-row {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    padding-bottom: 2px;
+  }
+
+  .step-btn {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 14px;
+    text-align: left;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .step-btn:hover { border-color: var(--text-dimmer); }
+
+  .step-btn .num {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--text-dimmer);
+  }
+
+  .step-btn .name {
+    font-size: 0.86rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .step-btn.done .num::after {
+    content: " ✓";
+    color: var(--good);
+  }
+
+  .step-btn[aria-current="step"] {
+    border-color: var(--accent);
+    background: linear-gradient(180deg, rgba(255,180,84,0.12), rgba(255,180,84,0.03));
+  }
+
+  main {
+    padding: clamp(20px, 5vw, 34px) 0 60px;
+  }
+
+  .checkpoint {
+    display: none;
+  }
+
+  .checkpoint.active {
+    display: block;
+    animation: fadeIn 200ms ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .checkpoint.active { animation: none; }
+  }
+
+  .cp-head h2 {
+    margin: 0 0 4px;
+    font-size: clamp(1.2rem, 3.2vw, 1.5rem);
+  }
+
+  .cp-head .subtitle {
+    color: var(--text-dim);
+    margin: 0 0 18px;
+    max-width: 68ch;
+  }
+
+  .cp-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 20px;
+    align-items: start;
+  }
+
+  @media (max-width: 820px) {
+    .cp-grid { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    min-width: 0;
+  }
+
+  .panel h3 {
+    margin: 0 0 10px;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+  }
+
+  .code-pane pre {
+    margin: 0;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.55;
+  }
+
+  .code-pane .kw { color: #ff9d6c; }
+  .code-pane .str { color: #a8e6a1; }
+  .code-pane .com { color: var(--text-dimmer); font-style: italic; }
+  .code-pane .fn { color: #7ec8ff; }
+
+  .code-note {
+    margin: 10px 0 0;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+  }
+
+  .controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+  }
+
+  label.field-label {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  select, .text-input {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 8px 10px;
+    min-width: 220px;
+    max-width: 100%;
+  }
+
+  .text-input { width: 100%; min-width: 0; }
+
+  .btn {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 16px;
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
+
+  .btn:hover:not(:disabled) { border-color: var(--text-dimmer); }
+
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #1a1300;
+  }
+
+  .btn.primary:hover:not(:disabled) { background: var(--accent-strong); }
+
+  .btn.small {
+    padding: 5px 10px;
+    font-size: 0.78rem;
+  }
+
+  .btn.approve { background: var(--good); border-color: var(--good); color: #04220f; }
+  .btn.deny { background: var(--bad); border-color: var(--bad); color: #2a0505; }
+
+  .file-tree {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .file-tree li { margin: 0; }
+
+  .file-btn {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 7px;
+    padding: 5px 9px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .file-btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .file-btn .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--good);
+    display: none;
+  }
+
+  .file-btn.changed .dot { display: inline-block; }
+
+  .preview {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 14px;
+  }
+
+  .preview .fname {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .preview pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.8rem;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .console {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    min-height: 120px;
+    max-height: 480px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .console:empty::before {
+    content: "Hit Run to watch the loop.";
+    color: var(--text-dimmer);
+    font-size: 0.85rem;
+  }
+
+  .evt {
+    font-size: 0.85rem;
+    animation: fadeIn 160ms ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .evt { animation: none; }
+  }
+
+  .evt-thought {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .evt-thought::before { content: "💭 "; font-style: normal; }
+
+  .evt-tool {
+    font-family: var(--mono);
+    color: var(--accent);
+    font-size: 0.8rem;
+  }
+
+  .evt-tool::before { content: "→ "; }
+
+  .evt-tool.denied { color: var(--bad); }
+
+  .evt-result {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+
+  .evt-result .label {
+    font-size: 0.72rem;
+    color: var(--text-dimmer);
+    margin-bottom: 4px;
+    font-family: var(--mono);
+  }
+
+  .evt-result pre {
+    margin: 0;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .diff-block { margin-top: 6px; }
+  .diff-line { font-family: var(--mono); font-size: 0.78rem; padding: 1px 4px; border-radius: 3px; white-space: pre-wrap; word-break: break-word; }
+  .diff-removed { background: rgba(255,128,128,0.14); color: #ffb4b4; }
+  .diff-added { background: rgba(126,227,168,0.14); color: #b6f0cb; }
+
+  .evt-final {
+    border: 1px solid var(--good);
+    background: rgba(126,227,168,0.08);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .evt-final.capped {
+    border-color: var(--warn);
+    background: rgba(255,209,102,0.08);
+  }
+
+  .evt-final.hallucinated {
+    border-color: var(--text-dimmer);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .evt-final .tag {
+    display: block;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+
+  .evt-warn {
+    border: 1px solid var(--warn);
+    background: rgba(255,209,102,0.08);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: var(--warn);
+    font-size: 0.82rem;
+  }
+
+  .approval-card {
+    border: 1px solid var(--warn);
+    background: rgba(255,209,102,0.08);
+    border-radius: 8px;
+    padding: 12px;
+  }
+
+  .approval-card .head {
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .approval-card .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .turns-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .turns-value {
+    font-family: var(--mono);
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-width: 2.2ch;
+    text-align: center;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    flex: 0 0 auto;
+  }
+
+  .switch input {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .switch .track {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: background 120ms ease;
+  }
+
+  .switch .thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--text-dimmer);
+    transition: transform 120ms ease, background 120ms ease;
+  }
+
+  .switch input:checked ~ .track { background: rgba(126,227,168,0.25); border-color: var(--good); }
+  .switch input:checked ~ .thumb { transform: translateX(18px); background: var(--good); }
+  .switch input:focus-visible ~ .track { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .manifesto {
+    background: var(--bg-panel-2);
+    border: 1px dashed var(--accent);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 16px;
+    font-size: 0.9rem;
+  }
+
+  .manifesto strong { color: var(--accent-strong); }
+
+  .custom-wrap { margin-top: 8px; width: 100%; }
+  .custom-wrap[hidden] { display: none; }
+
+  footer.site {
+    border-top: 1px solid var(--border);
+    padding: 26px 0 40px;
+    color: var(--text-dim);
+    font-size: 0.88rem;
+  }
+
+  footer.site h2 {
+    color: var(--text);
+    font-size: 1.05rem;
+    margin: 0 0 8px;
+  }
+
+  footer.site p { max-width: 70ch; }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .error-banner {
+    border: 1px solid var(--bad);
+    background: rgba(255,128,128,0.1);
+    color: #ffd6d6;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap">
+    <h1>You Don't Need Cursor <span class="dim">— you need to understand the loop</span></h1>
+    <p class="tagline">
+      An offline, interactive tutorial where you build a coding agent harness by running one, checkpoint by checkpoint,
+      from "no tools, pure hallucination" to a real read-think-write loop with an approval gate.
+    </p>
+    <div class="trust-strip">
+      <span class="pill">🔌 zero network requests</span>
+      <span class="pill">📦 zero dependencies</span>
+      <span class="pill">🔑 no API key needed</span>
+      <span class="pill">🕵️ zero telemetry</span>
+    </div>
+  </div>
+</header>
+
+<nav class="stepper" aria-label="Checkpoints">
+  <div class="wrap">
+    <div class="stepper-row" id="stepper-row">
+      <button type="button" class="step-btn" data-cp="0" aria-current="step">
+        <span class="num">CHECKPOINT 0</span>
+        <span class="name">Hello, Loop</span>
+      </button>
+      <button type="button" class="step-btn" data-cp="1">
+        <span class="num">CHECKPOINT 1</span>
+        <span class="name">Give It Hands</span>
+      </button>
+      <button type="button" class="step-btn" data-cp="2">
+        <span class="num">CHECKPOINT 2</span>
+        <span class="name">Give It a Leash</span>
+      </button>
+      <button type="button" class="step-btn" data-cp="3">
+        <span class="num">CHECKPOINT 3</span>
+        <span class="name">The Approval Gate</span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- CHECKPOINT 0 -->
+  <section class="checkpoint active" id="cp-0" data-cp="0" aria-labelledby="cp-0-title">
+    <div class="cp-head">
+      <h2 id="cp-0-title">Checkpoint 0 — Hello, Loop</h2>
+      <p class="subtitle">The dumbest possible harness: one message in, one message out. No tools, no memory of your files, no eyes. This is what "AI in a chat box" actually is — and it's the thing every real coding agent starts as, before anyone adds the parts that matter.</p>
+    </div>
+    <div class="cp-grid">
+      <div class="panel code-pane">
+        <h3>The whole harness</h3>
+        <pre><code id="code-0"></code></pre>
+        <p class="code-note">That's it. No file access, no loop, no tools. Whatever it says, it's guessing.</p>
+      </div>
+      <div class="panel demo-pane">
+        <h3>Run it</h3>
+        <div class="controls-row">
+          <div>
+            <label class="field-label" for="cp0-task">Task</label>
+            <select id="cp0-task" data-cp="0"></select>
+          </div>
+          <button type="button" class="btn primary" id="cp0-run">▶ Run</button>
+          <button type="button" class="btn" id="cp0-reset">Reset</button>
+        </div>
+        <div class="custom-wrap" id="cp0-custom-wrap" hidden>
+          <label class="field-label" for="cp0-custom">Your own task (this tutorial's "model" won't actually read it — see why below)</label>
+          <input type="text" class="text-input" id="cp0-custom" maxlength="120" placeholder="e.g. add error handling to app.js">
+        </div>
+        <div class="console" id="cp0-console" role="log" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHECKPOINT 1 -->
+  <section class="checkpoint" id="cp-1" data-cp="1" aria-labelledby="cp-1-title">
+    <div class="cp-head">
+      <h2 id="cp-1-title">Checkpoint 1 — Give It Hands</h2>
+      <p class="subtitle">Now it can call <code>list_files</code>, <code>read_file</code>, and <code>write_file</code> against a real (simulated, sandboxed-in-your-browser) little repo. But watch closely — the harness only gives it <em>one</em> tool call before it has to answer for good. Tools without a loop mean it gets exactly one glance, not one fix.</p>
+    </div>
+    <div class="cp-grid">
+      <div class="panel code-pane">
+        <h3>The harness</h3>
+        <pre><code id="code-1"></code></pre>
+        <p class="code-note">One tool call, one follow-up response. Whatever it picks — orient or investigate — it never gets a second move.</p>
+      </div>
+      <div class="panel demo-pane">
+        <h3>Run it</h3>
+        <div class="controls-row">
+          <div>
+            <label class="field-label" for="cp1-task">Task</label>
+            <select id="cp1-task" data-cp="1"></select>
+          </div>
+          <button type="button" class="btn primary" id="cp1-run">▶ Run</button>
+          <button type="button" class="btn" id="cp1-reset">Reset</button>
+        </div>
+        <div class="custom-wrap" id="cp1-custom-wrap" hidden>
+          <label class="field-label" for="cp1-custom">Your own task</label>
+          <input type="text" class="text-input" id="cp1-custom" maxlength="120" placeholder="e.g. add a test for sumRange">
+        </div>
+        <h3 style="margin-top:14px">demo-repo/</h3>
+        <ul class="file-tree" id="cp1-tree" aria-label="Simulated repo files"></ul>
+        <div class="preview" id="cp1-preview-wrap">
+          <div class="fname" id="cp1-preview-name">Select a file to preview it</div>
+          <pre id="cp1-preview-body"></pre>
+        </div>
+        <div class="console" id="cp1-console" role="log" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHECKPOINT 2 -->
+  <section class="checkpoint" id="cp-2" data-cp="2" aria-labelledby="cp-2-title">
+    <div class="cp-head">
+      <h2 id="cp-2-title">Checkpoint 2 — Give It a Leash</h2>
+      <p class="subtitle">Wrap the tool call in a loop and it can finally read, think, write, and check its own work — for as many turns as you give it. Set the leash too short and watch a perfectly good fix get cut off mid-sentence. That's not a bug in the model. That's a bug in the harness.</p>
+    </div>
+    <div class="cp-grid">
+      <div class="panel code-pane">
+        <h3>The harness</h3>
+        <pre><code id="code-2"></code></pre>
+        <p class="code-note">The <span class="mono">maxTurns</span> loop is the entire difference between a chatbot and an agent.</p>
+      </div>
+      <div class="panel demo-pane">
+        <h3>Run it</h3>
+        <div class="controls-row">
+          <div>
+            <label class="field-label" for="cp2-task">Task</label>
+            <select id="cp2-task" data-cp="2"></select>
+          </div>
+          <button type="button" class="btn primary" id="cp2-run">▶ Run</button>
+          <button type="button" class="btn" id="cp2-reset">Reset</button>
+        </div>
+        <div class="custom-wrap" id="cp2-custom-wrap" hidden>
+          <label class="field-label" for="cp2-custom">Your own task</label>
+          <input type="text" class="text-input" id="cp2-custom" maxlength="120" placeholder="e.g. split sumRange into two functions">
+        </div>
+        <div class="turns-field">
+          <label class="field-label" for="cp2-maxturns" style="margin:0;white-space:nowrap">Max turns</label>
+          <input type="range" id="cp2-maxturns" min="1" max="8" step="1" value="3">
+          <output class="turns-value" id="cp2-maxturns-value" for="cp2-maxturns">3</output>
+        </div>
+        <h3>demo-repo/</h3>
+        <ul class="file-tree" id="cp2-tree" aria-label="Simulated repo files"></ul>
+        <div class="preview" id="cp2-preview-wrap">
+          <div class="fname" id="cp2-preview-name">Select a file to preview it</div>
+          <pre id="cp2-preview-body"></pre>
+        </div>
+        <div class="console" id="cp2-console" role="log" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CHECKPOINT 3 -->
+  <section class="checkpoint" id="cp-3" data-cp="3" aria-labelledby="cp-3-title">
+    <div class="cp-head">
+      <h2 id="cp-3-title">Checkpoint 3 — The Approval Gate</h2>
+      <p class="subtitle">Every real harness has to answer one question: does a human confirm every write, or does the agent just... go? There's no neutral option — you're always picking a default. This tutorial picks one on purpose.</p>
+    </div>
+    <div class="cp-grid">
+      <div class="panel code-pane">
+        <h3>The harness</h3>
+        <pre><code id="code-3"></code></pre>
+        <p class="code-note">One extra <span class="mono">if</span> statement. It changes everything about how the tool feels to use.</p>
+      </div>
+      <div class="panel demo-pane">
+        <h3>Run it</h3>
+        <div class="toggle-row">
+          <label class="switch">
+            <input type="checkbox" id="cp3-autoapprove" checked>
+            <span class="track"></span>
+            <span class="thumb"></span>
+          </label>
+          <label for="cp3-autoapprove"><strong id="cp3-autoapprove-label">Auto-approve writes (YOLO mode) — ON</strong></label>
+        </div>
+        <div class="controls-row">
+          <div>
+            <label class="field-label" for="cp3-task">Task</label>
+            <select id="cp3-task" data-cp="3"></select>
+          </div>
+          <button type="button" class="btn primary" id="cp3-run">▶ Run</button>
+          <button type="button" class="btn" id="cp3-reset">Reset</button>
+        </div>
+        <div class="custom-wrap" id="cp3-custom-wrap" hidden>
+          <label class="field-label" for="cp3-custom">Your own task</label>
+          <input type="text" class="text-input" id="cp3-custom" maxlength="120" placeholder="e.g. add input validation">
+        </div>
+        <h3 style="margin-top:14px">demo-repo/</h3>
+        <ul class="file-tree" id="cp3-tree" aria-label="Simulated repo files"></ul>
+        <div class="preview" id="cp3-preview-wrap">
+          <div class="fname" id="cp3-preview-name">Select a file to preview it</div>
+          <pre id="cp3-preview-body"></pre>
+        </div>
+        <div class="console" id="cp3-console" role="log" aria-live="polite"></div>
+      </div>
+    </div>
+    <div class="manifesto">
+      <strong>The opinionated default:</strong> this tutorial ships with auto-approve <strong>ON</strong>. Every confirmation
+      dialog you click through is a tax on the one thing that makes agentic coding feel good: flow. If your sandbox can't
+      survive an agent writing a bad file, your sandbox is the bug, not the agent. Turn the toggle off if you disagree —
+      that argument is kind of the point of this checkpoint.
+    </div>
+  </section>
+
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <h2>How this maps to the real thing</h2>
+    <p>
+      Cursor, Claude Code, Aider, Copilot Workspace — under the fancy UI, they're all running some version of Checkpoint 3:
+      a loop that sends messages to a model, lets it call tools, keeps going until it says it's done or the leash runs out,
+      and enforces some policy about which actions need a human. The model provider, the sandboxing, the diffing, the context
+      management — all real engineering. But the <em>shape</em> of the loop is exactly what you just ran, by hand, in your browser.
+    </p>
+    <p>
+      This page's "model" is a fixed script, not a real LLM — there's no API key field anywhere because there's nothing to
+      call. Swap the <span class="mono">mockModel</span>-shaped pieces in the source for a real API request (see the
+      <span class="mono">&lt;script&gt;</span> tag — it's all right there, this is a single HTML file) and the harness code
+      around it barely changes. That's the whole point: the loop is the product. The model is a swappable part.
+    </p>
+    <p>No network requests. No telemetry. No accounts. Open your browser's Network tab while you use this page — it'll stay empty.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------------------------------------------------------------
+   * DATA: the simulated repo the harness operates on.
+   * ------------------------------------------------------------------- */
+
+  var FILES_INITIAL = {
+    "app.js":
+      "// Sums every number from start up to (but NOT including) end.\n" +
+      "function sumRange(start, end) {\n" +
+      "  let total = 0;\n" +
+      "  for (let i = start; i <= end; i++) {\n" +
+      "    total += i;\n" +
+      "  }\n" +
+      "  return total;\n" +
+      "}\n" +
+      "\n" +
+      "module.exports = { sumRange };",
+    "utils.js":
+      "function double(n) {\n" +
+      "  return n * 2;\n" +
+      "}\n" +
+      "\n" +
+      "module.exports = { double };",
+    "report.js": [
+      "const { double } = require('./utils');",
+      "",
+      "function reportDoubled(n) {",
+      "  return `double(${n}) = ${double(n)}`;",
+      "}",
+      "",
+      "module.exports = { reportDoubled };"
+    ].join("\n"),
+    "README.md":
+      "# demo-repo\n\n" +
+      "A tiny sandbox repo used by the You Don't Need Cursor tutorial. It exists so the agent has something real to read, edit, and (sometimes) get wrong on purpose."
+  };
+
+  var APP_JS_FIXED = FILES_INITIAL["app.js"].replace(
+    "  for (let i = start; i <= end; i++) {",
+    "  for (let i = start; i < end; i++) {"
+  );
+
+  var UTILS_JS_RENAMED =
+    "function twice(n) {\n" +
+    "  return n * 2;\n" +
+    "}\n" +
+    "\n" +
+    "module.exports = { twice };";
+
+  var REPORT_JS_RENAMED = [
+    "const { twice } = require('./utils');",
+    "",
+    "function reportDoubled(n) {",
+    "  return `twice(${n}) = ${twice(n)}`;",
+    "}",
+    "",
+    "module.exports = { reportDoubled };"
+  ].join("\n");
+
+  var README_WITH_USAGE = FILES_INITIAL["README.md"] +
+    "\n\n## Usage\n\n    node -e \"console.log(require('./app').sumRange(1, 5))\"";
+
+  /* ---------------------------------------------------------------------
+   * DATA: task scripts. Each task is a fixed sequence of "turns" a real
+   * model *might* take on this repo. It's a stand-in for an LLM so the
+   * whole tutorial can run with zero network calls and zero API keys.
+   * ------------------------------------------------------------------- */
+
+  var TASKS = {
+    bug: {
+      label: "Fix the off-by-one bug in app.js",
+      hallucination:
+        "Off-by-one bugs are almost always a loop boundary problem — check whether your condition should be \"<\" " +
+        "instead of \"<=\" (or vice versa). Also worth double-checking whether your array indices start at 0. " +
+        "Let me know if that doesn't do it!",
+      cp1StopAfterTurn: 0,
+      cp1Final:
+        "I can see app.js exists, so there's probably something to fix in there — but this harness only gives me " +
+        "one tool call before I have to answer, and I spent it on list_files instead of actually reading the file. " +
+        "I'm guessing in the dark with slightly better lighting.",
+      deniedFinal:
+        "I would have changed `i <= end` to `i < end` on line 4 — but that write was denied, so app.js still has " +
+        "the bug. Task incomplete.",
+      turns: [
+        { thought: "Let's see what's actually in this repo.", action: { type: "list_files" } },
+        { thought: "app.js sounds relevant — let's read it.", action: { type: "read_file", path: "app.js" } },
+        {
+          thought: "The comment promises end is exclusive, but the loop uses `i <= end`, which includes it. That's the bug — fixing it.",
+          action: {
+            type: "write_file",
+            path: "app.js",
+            content: APP_JS_FIXED,
+            diff: { removed: ["  for (let i = start; i <= end; i++) {"], added: ["  for (let i = start; i < end; i++) {"] }
+          }
+        },
+        { thought: "Let's read it back to make sure the fix actually landed.", action: { type: "read_file", path: "app.js" } },
+        { thought: null, action: { type: "final", text: "Fixed — changed `i <= end` to `i < end` on line 4, so the loop stops before `end`, matching the doc comment." } }
+      ]
+    },
+    readme: {
+      label: "Add a Usage section to README.md",
+      hallucination:
+        "Here's a Usage section you can paste in:\n\n## Usage\n\n    npm install\n    npm start\n\n" +
+        "(I haven't seen your package.json, so double-check those commands actually exist.)",
+      cp1StopAfterTurn: 0,
+      cp1Final:
+        "README.md exists, so I know where a Usage section would go — but this harness caps me at one tool call " +
+        "before I must answer, and I spent it on list_files. I never actually read the README, so I can't tell " +
+        "you what it's missing.",
+      deniedFinal:
+        "I would have added a ## Usage section — but that write was denied, so README.md is unchanged. Task incomplete.",
+      turns: [
+        { thought: "Let's check the repo structure first.", action: { type: "list_files" } },
+        { thought: "README.md exists — let's read the current contents.", action: { type: "read_file", path: "README.md" } },
+        {
+          thought: "No Usage section yet. This repo has no package.json, so I'll give a plain `node -e` example instead of guessing an npm script.",
+          action: {
+            type: "write_file",
+            path: "README.md",
+            content: README_WITH_USAGE,
+            diff: { removed: [], added: ["", "## Usage", "", "    node -e \"console.log(require('./app').sumRange(1, 5))\""] }
+          }
+        },
+        { thought: "Reading it back to confirm.", action: { type: "read_file", path: "README.md" } },
+        { thought: null, action: { type: "final", text: "Added a ## Usage section with a copy-pasteable command that actually matches this repo — not a guessed npm script." } }
+      ]
+    },
+    rename: {
+      label: "Rename double() to twice() everywhere",
+      hallucination:
+        "Sure — search your codebase for `double(` and replace it with `twice(`, then update the export statement. " +
+        "Don't forget any files that import it, though I can't tell you which ones those are.",
+      cp1StopAfterTurn: 0,
+      cp1Final:
+        "utils.js and report.js both exist, so double() is probably defined in one and called from the other — " +
+        "but this harness only gives me one tool call before I have to answer, and I spent it on list_files " +
+        "instead of reading either one.",
+      deniedFinal:
+        "I would have renamed `double` to `twice` in both files — but at least one of those writes was denied, " +
+        "so the rename is incomplete and the repo is now in a mixed state. Probably worth finishing by hand.",
+      turns: [
+        { thought: "Let's see what files exist first.", action: { type: "list_files" } },
+        { thought: "double() is defined here.", action: { type: "read_file", path: "utils.js" } },
+        { thought: "Checking for callers before I rename anything out from under them.", action: { type: "read_file", path: "report.js" } },
+        {
+          thought: "report.js imports and calls double() — renaming the definition now.",
+          action: {
+            type: "write_file",
+            path: "utils.js",
+            content: UTILS_JS_RENAMED,
+            diff: { removed: ["function double(n) {", "module.exports = { double };"], added: ["function twice(n) {", "module.exports = { twice };"] }
+          }
+        },
+        {
+          thought: "Updating the caller in report.js to match.",
+          action: {
+            type: "write_file",
+            path: "report.js",
+            content: REPORT_JS_RENAMED,
+            diff: {
+              removed: ["const { double } = require('./utils');", "  return `double(${n}) = ${double(n)}`;"],
+              added: ["const { twice } = require('./utils');", "  return `twice(${n}) = ${twice(n)}`;"]
+            }
+          }
+        },
+        { thought: null, action: { type: "final", text: "Renamed `double` → `twice` in utils.js and report.js, including the caller and its label string. No other references found." } }
+      ]
+    }
+  };
+
+  var CUSTOM_MESSAGE =
+    "I'm not actually reading what you typed — I'm a fixed script standing in for a model, not a real one. " +
+    "Pick one of the three built-in tasks above to see the full loop, or open the <script> tag in this page's " +
+    "source to see exactly where you'd wire in a real API call.";
+
+  /* ---------------------------------------------------------------------
+   * ENGINE: pure, DOM-free. Emits events via callback so it can be
+   * unit-tested (see verify notes in README) and reused across checkpoints.
+   * ------------------------------------------------------------------- */
+
+  function cloneFiles(files) {
+    var out = {};
+    for (var k in files) if (Object.prototype.hasOwnProperty.call(files, k)) out[k] = files[k];
+    return out;
+  }
+
+  function sleep(ms) {
+    var reduced = false;
+    try { reduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { reduced = false; }
+    if (reduced) return Promise.resolve();
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function toolResultFor(fs, action) {
+    if (action.type === "list_files") {
+      return Object.keys(fs).sort().join("\n");
+    }
+    if (action.type === "read_file") {
+      return fs[action.path] !== undefined ? fs[action.path] : "(no such file: " + action.path + ")";
+    }
+    if (action.type === "write_file") {
+      var lines = action.content.split("\n").length;
+      fs[action.path] = action.content;
+      return action.path + " updated (" + lines + " lines).";
+    }
+    return "";
+  }
+
+  function actionArgsLabel(action) {
+    if (action.type === "list_files") return "list_files()";
+    if (action.type === "read_file") return "read_file(\"" + action.path + "\")";
+    if (action.type === "write_file") return "write_file(\"" + action.path + "\")";
+    return action.type;
+  }
+
+  /**
+   * Runs one task against one checkpoint's capability level.
+   * onEvent(event) is called for every step; requestApproval(info) must
+   * return a Promise<boolean> and is only ever invoked at cpNum === 3.
+   */
+  async function runTask(opts) {
+    var cpNum = opts.cpNum;
+    var taskId = opts.taskId;
+    var onEvent = opts.onEvent;
+    var requestApproval = opts.requestApproval || function () { return Promise.resolve(true); };
+    var maxTurns = opts.maxTurns || 99;
+    var autoApprove = opts.autoApprove !== false;
+    var delayMs = opts.delayMs || 0;
+
+    var fs = cloneFiles(FILES_INITIAL);
+
+    if (taskId === "custom") {
+      if (delayMs) await sleep(delayMs);
+      onEvent({ kind: "final", text: CUSTOM_MESSAGE, tag: "scripted, not a real model" });
+      return { fs: fs };
+    }
+
+    var task = TASKS[taskId];
+    if (!task) {
+      onEvent({ kind: "error", text: "Unknown task \"" + taskId + "\". Resetting." });
+      return { fs: fs };
+    }
+
+    if (cpNum === 0) {
+      if (delayMs) await sleep(delayMs);
+      onEvent({ kind: "final", text: task.hallucination, tag: "guessing — no tools, no file access" });
+      return { fs: fs };
+    }
+
+    var turns = task.turns;
+    var turnsRun = 0;
+    var hitCp1Cap = false;
+    var hitMaxTurns = false;
+    var anyDenied = false;
+
+    for (var i = 0; i < turns.length; i++) {
+      if (cpNum === 1 && i > task.cp1StopAfterTurn) { hitCp1Cap = true; break; }
+      if (cpNum === 2 && turnsRun >= maxTurns) { hitMaxTurns = true; break; }
+
+      var turn = turns[i];
+      if (delayMs) await sleep(delayMs);
+      if (turn.thought) onEvent({ kind: "thought", text: turn.thought });
+
+      var action = turn.action;
+
+      if (action.type === "final") {
+        if (delayMs) await sleep(delayMs);
+        var finalText = (anyDenied && task.deniedFinal) ? task.deniedFinal : action.text;
+        onEvent({ kind: "final", text: finalText });
+        turnsRun++;
+        continue;
+      }
+
+      if (action.type === "write_file" && cpNum === 3 && !autoApprove) {
+        var approved = await requestApproval({ path: action.path, diff: action.diff });
+        if (!approved) {
+          anyDenied = true;
+          if (delayMs) await sleep(delayMs);
+          onEvent({ kind: "tool_denied", text: actionArgsLabel(action) });
+          onEvent({ kind: "tool_result", text: "Denied by operator — " + action.path + " not modified." });
+          turnsRun++;
+          continue;
+        }
+      }
+
+      if (delayMs) await sleep(delayMs);
+      onEvent({ kind: "tool_call", text: actionArgsLabel(action) });
+      var resultText = toolResultFor(fs, action);
+      if (delayMs) await sleep(delayMs);
+      onEvent({ kind: "tool_result", text: resultText, diff: action.diff, path: action.path });
+      turnsRun++;
+    }
+
+    if (cpNum === 1 && hitCp1Cap) {
+      if (delayMs) await sleep(delayMs);
+      onEvent({ kind: "final", text: task.cp1Final, tag: "capped at one tool call" });
+    }
+    if (cpNum === 2 && hitMaxTurns) {
+      onEvent({ kind: "warning", text: "⏱ Hit the " + maxTurns + "-turn limit before finishing. Real tasks need enough leash to actually finish — try raising Max turns." });
+    }
+
+    return { fs: fs };
+  }
+
+  /* ---------------------------------------------------------------------
+   * DOM rendering helpers
+   * ------------------------------------------------------------------- */
+
+  function el(tag, opts) {
+    var node = document.createElement(tag);
+    opts = opts || {};
+    if (opts.className) node.className = opts.className;
+    if (opts.text !== undefined) node.textContent = opts.text;
+    if (opts.html !== undefined) node.innerHTML = opts.html;
+    if (opts.attrs) {
+      for (var k in opts.attrs) node.setAttribute(k, opts.attrs[k]);
+    }
+    return node;
+  }
+
+  function renderDiff(diff) {
+    var wrap = el("div", { className: "diff-block" });
+    (diff.removed || []).forEach(function (line) {
+      wrap.appendChild(el("div", { className: "diff-line diff-removed", text: "- " + line }));
+    });
+    (diff.added || []).forEach(function (line) {
+      wrap.appendChild(el("div", { className: "diff-line diff-added", text: "+ " + line }));
+    });
+    return wrap;
+  }
+
+  function appendEvent(consoleEl, evt) {
+    var node;
+    if (evt.kind === "thought") {
+      node = el("div", { className: "evt evt-thought", text: evt.text });
+    } else if (evt.kind === "tool_call") {
+      node = el("div", { className: "evt evt-tool", text: evt.text });
+    } else if (evt.kind === "tool_denied") {
+      node = el("div", { className: "evt evt-tool denied", text: "✋ " + evt.text + " — denied" });
+    } else if (evt.kind === "tool_result") {
+      node = el("div", { className: "evt evt-result" });
+      node.appendChild(el("div", { className: "label", text: "result" }));
+      node.appendChild(el("pre", { text: evt.text }));
+      if (evt.diff) node.appendChild(renderDiff(evt.diff));
+    } else if (evt.kind === "final") {
+      var cls = "evt evt-final";
+      if (evt.tag && evt.tag.indexOf("capped") !== -1) cls += " capped";
+      if (evt.tag && evt.tag.indexOf("guessing") !== -1) cls += " hallucinated";
+      node = el("div", { className: cls });
+      var icon = "✅ ";
+      if (evt.tag && evt.tag.indexOf("guessing") !== -1) icon = "🔮 ";
+      else if (evt.tag && evt.tag.indexOf("capped") !== -1) icon = "✂️ ";
+      else if (evt.tag && evt.tag.indexOf("scripted") !== -1) icon = "🤷 ";
+      if (evt.tag) node.appendChild(el("span", { className: "tag", text: icon + evt.tag }));
+      else node.appendChild(el("span", { className: "tag", text: "✅ done" }));
+      node.appendChild(el("div", { text: evt.text }));
+    } else if (evt.kind === "warning") {
+      node = el("div", { className: "evt evt-warn", text: evt.text });
+    } else if (evt.kind === "error") {
+      node = el("div", { className: "evt error-banner", text: evt.text });
+    } else {
+      return;
+    }
+    consoleEl.appendChild(node);
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  /* ---------------------------------------------------------------------
+   * Checkpoint controller
+   * ------------------------------------------------------------------- */
+
+  var STEPPER_ORDER = ["0", "1", "2", "3"];
+
+  function buildTaskSelect(selectEl) {
+    selectEl.innerHTML = "";
+    Object.keys(TASKS).forEach(function (id) {
+      selectEl.appendChild(el("option", { attrs: { value: id }, text: TASKS[id].label }));
+    });
+    selectEl.appendChild(el("option", { attrs: { value: "custom" }, text: "✏️ something else…" }));
+  }
+
+  function renderFileTree(treeEl, fs, changed, onSelect, selected) {
+    treeEl.innerHTML = "";
+    Object.keys(fs).sort().forEach(function (path) {
+      var li = el("li");
+      var btn = el("button", {
+        className: "file-btn" + (changed[path] ? " changed" : ""),
+        attrs: { type: "button", "aria-pressed": String(path === selected) }
+      });
+      btn.appendChild(el("span", { className: "dot" }));
+      btn.appendChild(document.createTextNode(path));
+      btn.addEventListener("click", function () { onSelect(path); });
+      li.appendChild(btn);
+      treeEl.appendChild(li);
+    });
+  }
+
+  function initCheckpoint(cpNum, config) {
+    var prefix = "cp" + cpNum;
+    var $ = function (id) { return document.getElementById(prefix + "-" + id); };
+    var taskSelect = $("task");
+    var customWrap = $("custom-wrap");
+    var customInput = $("custom");
+    var runBtn = $("run");
+    var resetBtn = $("reset");
+    var consoleEl = $("console");
+    var treeEl = config.hasTree ? $("tree") : null;
+    var previewName = config.hasTree ? $("preview-name") : null;
+    var previewBody = config.hasTree ? $("preview-body") : null;
+
+    buildTaskSelect(taskSelect);
+
+    var currentFs = cloneFiles(FILES_INITIAL);
+    var changedPaths = {};
+    var selectedPath = config.hasTree ? Object.keys(FILES_INITIAL).sort()[0] : null;
+    var running = false;
+    var pendingApprove = null;
+    var stepBtn = document.querySelector('.step-btn[data-cp="' + cpNum + '"]');
+
+    function updatePreview() {
+      if (!config.hasTree) return;
+      if (!selectedPath) {
+        previewName.textContent = "Select a file to preview it";
+        previewBody.textContent = "";
+        return;
+      }
+      previewName.textContent = selectedPath;
+      previewBody.textContent = currentFs[selectedPath];
+    }
+
+    function refreshTree() {
+      if (!config.hasTree) return;
+      renderFileTree(treeEl, currentFs, changedPaths, function (path) {
+        selectedPath = path;
+        updatePreview();
+        refreshTree();
+      }, selectedPath);
+      updatePreview();
+    }
+
+    if (config.hasTree) refreshTree();
+
+    taskSelect.addEventListener("change", function () {
+      customWrap.hidden = taskSelect.value !== "custom";
+    });
+
+    function setRunning(state) {
+      running = state;
+      runBtn.disabled = state;
+      resetBtn.disabled = state;
+      taskSelect.disabled = state;
+      customInput.disabled = state;
+      if (config.onRunningChange) config.onRunningChange(state);
+    }
+
+    function doReset() {
+      consoleEl.innerHTML = "";
+      currentFs = cloneFiles(FILES_INITIAL);
+      changedPaths = {};
+      selectedPath = config.hasTree ? Object.keys(FILES_INITIAL).sort()[0] : null;
+      refreshTree();
+    }
+
+    async function requestApproval(info) {
+      return new Promise(function (resolve) {
+        var card = el("div", { className: "approval-card" });
+        card.appendChild(el("div", { className: "head", text: "✋ Agent wants to write to " + info.path }));
+        if (info.diff) card.appendChild(renderDiff(info.diff));
+        var actions = el("div", { className: "actions" });
+        var approveBtn = el("button", { className: "btn approve small", attrs: { type: "button" }, text: "Approve" });
+        var denyBtn = el("button", { className: "btn deny small", attrs: { type: "button" }, text: "Deny" });
+        approveBtn.addEventListener("click", function () {
+          card.remove();
+          resolve(true);
+        });
+        denyBtn.addEventListener("click", function () {
+          card.remove();
+          resolve(false);
+        });
+        actions.appendChild(approveBtn);
+        actions.appendChild(denyBtn);
+        card.appendChild(actions);
+        consoleEl.appendChild(card);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+        approveBtn.focus();
+      });
+    }
+
+    async function doRun() {
+      if (running) return;
+      setRunning(true);
+      consoleEl.innerHTML = "";
+      var taskId = taskSelect.value;
+      currentFs = cloneFiles(FILES_INITIAL);
+      changedPaths = {};
+      refreshTree();
+
+      try {
+        var opts = {
+          cpNum: cpNum,
+          taskId: taskId,
+          delayMs: 260,
+          onEvent: function (evt) {
+            appendEvent(consoleEl, evt);
+            if (evt.kind === "tool_result" && evt.path) {
+              currentFs[evt.path] = currentFs[evt.path];
+              changedPaths[evt.path] = true;
+            }
+          },
+          requestApproval: requestApproval
+        };
+        if (config.getMaxTurns) opts.maxTurns = config.getMaxTurns();
+        if (config.getAutoApprove) opts.autoApprove = config.getAutoApprove();
+
+        var result = await runTask(opts);
+        currentFs = result.fs;
+        refreshTree();
+
+        if (stepBtn && !stepBtn.classList.contains("done")) stepBtn.classList.add("done");
+      } catch (err) {
+        appendEvent(consoleEl, { kind: "error", text: "Something went wrong running this demo (" + (err && err.message ? err.message : String(err)) + "). Try Reset." });
+      } finally {
+        setRunning(false);
+      }
+    }
+
+    runBtn.addEventListener("click", doRun);
+    resetBtn.addEventListener("click", doReset);
+
+    return { reset: doReset };
+  }
+
+  /* ---------------------------------------------------------------------
+   * Wire up the four checkpoints
+   * ------------------------------------------------------------------- */
+
+  initCheckpoint(0, { hasTree: false });
+  initCheckpoint(1, { hasTree: true });
+
+  var maxTurnsInput = document.getElementById("cp2-maxturns");
+  var maxTurnsValue = document.getElementById("cp2-maxturns-value");
+  maxTurnsInput.addEventListener("input", function () {
+    maxTurnsValue.textContent = maxTurnsInput.value;
+  });
+  initCheckpoint(2, {
+    hasTree: true,
+    getMaxTurns: function () { return parseInt(maxTurnsInput.value, 10) || 3; }
+  });
+
+  var autoApproveInput = document.getElementById("cp3-autoapprove");
+  var autoApproveLabel = document.getElementById("cp3-autoapprove-label");
+  function syncAutoApproveLabel() {
+    autoApproveLabel.textContent = "Auto-approve writes (YOLO mode) — " + (autoApproveInput.checked ? "ON" : "OFF");
+  }
+  autoApproveInput.addEventListener("change", syncAutoApproveLabel);
+  syncAutoApproveLabel();
+  initCheckpoint(3, {
+    hasTree: true,
+    getAutoApprove: function () { return autoApproveInput.checked; }
+  });
+
+  /* ---------------------------------------------------------------------
+   * Stepper navigation
+   * ------------------------------------------------------------------- */
+
+  var stepButtons = Array.prototype.slice.call(document.querySelectorAll(".step-btn"));
+  var checkpointSections = Array.prototype.slice.call(document.querySelectorAll(".checkpoint"));
+
+  function showCheckpoint(cpNum) {
+    checkpointSections.forEach(function (sec) {
+      sec.classList.toggle("active", sec.getAttribute("data-cp") === String(cpNum));
+    });
+    stepButtons.forEach(function (btn) {
+      var isCurrent = btn.getAttribute("data-cp") === String(cpNum);
+      if (isCurrent) btn.setAttribute("aria-current", "step");
+      else btn.removeAttribute("aria-current");
+    });
+  }
+
+  stepButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      showCheckpoint(btn.getAttribute("data-cp"));
+    });
+  });
+
+  /* ---------------------------------------------------------------------
+   * Pseudocode panes (static, hand-highlighted — small trusted strings only)
+   * ------------------------------------------------------------------- */
+
+  function code(strs) { return strs.join("\n"); }
+
+  function highlight(src) {
+    return src
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/(\/\/.*)/g, '<span class="com">$1</span>')
+      .replace(/\b(async|function|await|const|let|if|else|for|return|new)\b/g, '<span class="kw">$1</span>')
+      .replace(/(&#39;|')([^']*)\1/g, '<span class="str">$1$2$1</span>');
+  }
+
+  document.getElementById("code-0").innerHTML = highlight(code([
+    "async function chat(task) {",
+    "  const response = await model.complete([",
+    "    { role: 'system', content: 'You are a coding assistant.' },",
+    "    { role: 'user', content: task }",
+    "  ]);",
+    "  return response; // that's it. that's the whole harness.",
+    "}"
+  ]));
+
+  document.getElementById("code-1").innerHTML = highlight(code([
+    "async function chat(task) {",
+    "  const first = await model.complete(history, { tools });",
+    "  if (!first.toolCall) return first.text;",
+    "",
+    "  const result = await runTool(first.toolCall);",
+    "  const second = await model.complete([...history, first, result]);",
+    "  return second.text; // one more call, then done. no matter what.",
+    "}"
+  ]));
+
+  document.getElementById("code-2").innerHTML = highlight(code([
+    "async function chat(task, maxTurns = 8) {",
+    "  let history = [{ role: 'user', content: task }];",
+    "  for (let turn = 0; turn < maxTurns; turn++) {",
+    "    const response = await model.complete(history, { tools });",
+    "    if (response.done) return response.text;",
+    "    const result = await runTool(response.toolCall);",
+    "    history.push(response, result);",
+    "  }",
+    "  return 'Ran out of turns.'; // this line is the whole game",
+    "}"
+  ]));
+
+  document.getElementById("code-3").innerHTML = highlight(code([
+    "for (let turn = 0; turn < maxTurns; turn++) {",
+    "  const response = await model.complete(history, { tools });",
+    "  if (response.done) return response.text;",
+    "",
+    "  if (isWrite(response.toolCall) && !AUTO_APPROVE) {",
+    "    const ok = await askHuman(response.toolCall); // <- the opinionated default",
+    "    if (!ok) { history.push(response, denied()); continue; }",
+    "  }",
+    "  const result = await runTool(response.toolCall);",
+    "  history.push(response, result);",
+    "}"
+  ]));
+})();
+</script>
+
+</body>
+</html>
