@@ -1,5 +1,7 @@
 # You Don't Need Cursor
 
+![You Don't Need Cursor — build the agent loop yourself, in one HTML file](banner.svg)
+
 **Zero dependencies. Zero API keys. Zero network requests. One HTML file that teaches you exactly what your AI coding tool is doing behind the loading spinner.**
 
 ## What this is
@@ -88,6 +90,10 @@ The whole app is one `index.html` — inline CSS, inline JS, no build step, no `
 ## Swapping in a real model
 
 The mock "model" is just a JavaScript function (`runTask` in `index.html`) that returns a fixed sequence of tool calls for three built-in demo tasks. A real integration would replace that fixed sequence with an actual API call inside the loop shown in each checkpoint's code pane — the harness code around it (the `for` loop, the tool dispatch, the approval gate) barely changes. That's deliberately left as an exercise rather than built in, so this tool can make the "zero network requests" promise above without any asterisks.
+
+## Changelog
+
+- **Fixed #1** — README had no banner, so shared links (Slack, X, GitHub social preview) rendered as grey nothing. Added a hand-authored SVG banner (`banner.svg`, no external references) and a README hero image.
 
 ## License
 
